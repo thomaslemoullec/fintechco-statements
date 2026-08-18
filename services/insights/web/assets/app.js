@@ -5,9 +5,9 @@
 // instance lifecycle (dispose on route change, debounced resize).
 // =============================================================================
 import {
-  el, mount, statTile, indicatorCard, newsCard, emptyState, sectionHeader,
+  el, mount, statTile, indicatorCard, newsCard, emptyState, sectionHeader, segmented, viewMeta,
 } from "/assets/components.js";
-import { lineOption } from "/assets/charts.js";
+import { lineOption, twoSeriesOption } from "/assets/charts.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -51,6 +51,18 @@ function renderChart(node, option) {
 function disposeCharts() {
   for (const c of instances) c.dispose();
   instances.clear();
+}
+
+// Dispose only the chart instances mounted inside a given container (used when
+// swapping a segmented sub-view without a full route change).
+function disposeChartsIn(container) {
+  for (const node of container.querySelectorAll(".chart")) {
+    const chart = echarts.getInstanceByDom(node);
+    if (chart) {
+      instances.delete(chart);
+      chart.dispose();
+    }
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -133,8 +145,13 @@ async function renderHome(root) {
   mount(brief, news.map(newsCard));
 }
 
-// --- Financial Indicators → Macro: indicator cards. --------------------------
-async function renderMacro(root) {
+// --- Financial Indicators → Macro: indicator cards + inflation-vs-unemployment. ----
+const MACRO_VIEW_OPTIONS = [
+  { id: "cards", label: "Key indicators" },
+  { id: "inflation-unemployment", label: "Inflation vs. Unemployment" },
+];
+
+async function renderIndicatorCards(container) {
   const cardsSection = el("section", { className: "section" });
   cardsSection.appendChild(sectionHeader({
     title: "Key indicators",
@@ -142,7 +159,7 @@ async function renderMacro(root) {
   }));
   const grid = el("div", { className: "card-grid" });
   cardsSection.appendChild(grid);
-  root.appendChild(cardsSection);
+  container.appendChild(cardsSection);
 
   const seriesById = {};
   await Promise.all(
@@ -167,6 +184,82 @@ async function renderMacro(root) {
   }
   // Render after cards are in the DOM (ECharts needs measurable dimensions).
   for (const [node, option] of chartMounts) renderChart(node, option);
+}
+
+// SCRUM-7 — is the Phillips-curve tradeoff still holding? Dual-line time series
+// (chosen over a scatter so the tradeoff's evolution over a shared timeline reads
+// at a glance) built from the paired /api/views/inflation-unemployment endpoint.
+async function renderInflationUnemployment(container) {
+  const section = el("section", { className: "section" });
+  section.appendChild(sectionHeader({
+    title: "Inflation vs. Unemployment",
+    sub: "Is the Phillips-curve tradeoff still holding? · U.S. series via FRED",
+  }));
+
+  const chartEl = el("div", { className: "chart" });
+  section.appendChild(el("div", { className: "card" }, [chartEl]));
+  container.appendChild(section);
+
+  const [view, { indicators }] = await Promise.all([
+    getJSON("/api/views/inflation-unemployment"),
+    getJSON("/api/indicators"),
+  ]);
+  const sourceFor = (id) => indicators.find((i) => i.id === id)?.source;
+
+  const dates = view.points.map((p) => p.date);
+  const inflation = view.points.map((p) => p.inflation);
+  const unemployment = view.points.map((p) => p.unemployment);
+  renderChart(
+    chartEl,
+    twoSeriesOption(dates, inflation, unemployment, "Inflation (YoY %)", "Unemployment (%)"),
+  );
+
+  container.appendChild(viewMeta({
+    sources: [...new Set([sourceFor("INFLATION"), sourceFor("UNRATE")].filter(Boolean))],
+    methodology:
+      "Inflation is the year-over-year % change in the CPI (All Urban Consumers); " +
+      "unemployment is the seasonally adjusted civilian unemployment rate. Both are aligned " +
+      "to a common monthly index and months where either series is unavailable are dropped.",
+    disclaimer: view.disclaimer,
+    decisions: [
+      {
+        question: "Scatter (classic Phillips-curve plot) or dual-line time series?",
+        choice: "Dual-line time series",
+        rationale: "Reads more clearly whether the tradeoff has weakened over a shared timeline than a scatter would.",
+      },
+    ],
+  }));
+}
+
+async function renderMacro(root) {
+  const toggleSection = el("div", { className: "section" });
+  const mountPoint = el("div");
+  root.appendChild(toggleSection);
+  root.appendChild(mountPoint);
+
+  let active = MACRO_VIEW_OPTIONS[0].id;
+
+  const renderActive = async () => {
+    disposeChartsIn(mountPoint);
+    mount(mountPoint, []);
+    if (active === "inflation-unemployment") await renderInflationUnemployment(mountPoint);
+    else await renderIndicatorCards(mountPoint);
+  };
+
+  toggleSection.appendChild(segmented({
+    options: MACRO_VIEW_OPTIONS,
+    selected: active,
+    ariaLabel: "Macro view",
+    onChange: (id) => {
+      active = id;
+      renderActive().catch((e) => {
+        console.error("Macro sub-view render error:", e);
+        showError(e.message || "unknown error");
+      });
+    },
+  }));
+
+  await renderActive();
 }
 
 // --- Empty placeholder pages -------------------------------------------------

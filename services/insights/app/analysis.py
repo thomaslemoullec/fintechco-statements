@@ -47,6 +47,27 @@ def as_of() -> str:
     return build_frame().index.max().date().isoformat()
 
 
+def inflation_unemployment_view() -> dict:
+    """Paired inflation/unemployment points for the Phillips-curve tab (SCRUM-7).
+
+    Reuses build_frame()'s existing monthly alignment — no new transform.
+    """
+    frame = build_frame()
+    points = [
+        {
+            "date": d.date().isoformat(),
+            "inflation": round(float(r.inflation), 2),
+            "unemployment": round(float(r.unemployment), 2),
+        }
+        for d, r in frame.iterrows()
+    ]
+    return {
+        "as_of": frame.index.max().date().isoformat(),
+        "disclaimer": DISCLAIMER,
+        "points": points,
+    }
+
+
 def series_view(indicator_id: str) -> dict:
     ind = INDICATORS.get(indicator_id)
     if ind is None:

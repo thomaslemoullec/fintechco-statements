@@ -98,3 +98,47 @@ export function lineOption(series, indicator) {
     ],
   };
 }
+
+// -----------------------------------------------------------------------------
+// Two-series line chart (e.g. inflation vs. unemployment). A legend is required
+// whenever more than one series is on the chart — color never carries identity
+// alone (see DESIGN.md chart rules).
+// -----------------------------------------------------------------------------
+export function twoSeriesOption(dates, seriesA, seriesB, labelA, labelB) {
+  return {
+    textStyle: baseTextStyle,
+    grid: { left: 40, right: 12, top: 32, bottom: 24 },
+    legend: { data: [labelA, labelB], textStyle: { color: THEME.muted, fontFamily: THEME.fontSans } },
+    tooltip: {
+      ...tooltipCommon,
+      trigger: "axis",
+      axisPointer: { type: "line", lineStyle: { color: THEME.border } },
+      formatter: (params) =>
+        `${fmtMonth(params[0].axisValue)}<br/>` +
+        params.map((p) => `${p.marker} ${p.seriesName}: <b>${p.data}</b>`).join("<br/>"),
+    },
+    xAxis: {
+      type: "category",
+      data: dates,
+      boundaryGap: false,
+      ...axisCommon,
+      splitLine: { show: false },
+      axisLabel: {
+        ...axisCommon.axisLabel,
+        formatter: (v) => v.slice(0, 4),
+        interval: (i, v) => v.endsWith("-01-01") && Number(v.slice(0, 4)) % 20 === 0,
+      },
+    },
+    yAxis: {
+      type: "value",
+      scale: true,
+      ...axisCommon,
+      axisLine: { show: false },
+      axisLabel: { ...axisCommon.axisLabel, formatter: "{value}%" },
+    },
+    series: [
+      { name: labelA, type: "line", data: seriesA, showSymbol: false, lineStyle: { color: THEME.accent, width: 2 } },
+      { name: labelB, type: "line", data: seriesB, showSymbol: false, lineStyle: { color: THEME.accentStrong, width: 2, type: "dashed" } },
+    ],
+  };
+}
